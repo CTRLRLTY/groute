@@ -1,0 +1,113 @@
+#!/bin/sh
+
+filename=$(basename $0)
+
+#### Package requirements
+if ! ip -V > /dev/null 2>&1; then
+	echo "$filename requires iproute2 package"
+	exit 1
+fi
+
+if ! wg --version > /dev/null 2>&1; then
+	echo "$filename requires wireguard package"
+	exit 1
+fi
+
+
+#### Configuration variables
+wg_if=wg0
+keyname=privatekey
+pubkeyname=publickey
+
+
+#### Main
+print_help() {
+	echo "USAGE:"
+	echo "genkey \t\t\t\t\t\t\t generates wireguard's private and public key"
+	echo "add wireguard <CIDR> private-key <PATH> \t\t create a wireguard interface (default: wg0) with the specified <CIDR>"
+	echo "add peer pubkey <PUBKEY> wgaddr <CIDR> addr <CIDR> \t add connection between peers"
+	echo "set host client servaddr <INET> \t\t\t setup host as client and connects to server with address <INET>. Creates a restore.sh for restoring host configuration"
+	echo "set host server \t\t\t\t\t setup host as server. Creates a restore.sh for restoring host configuration"
+	echo	
+	echo "EXAMPLE:"
+	echo "$filename genkey"
+	echo "$filename add wireguard 10.0.0.2/24 private-key ./privatekey"
+	echo "$filename add peer pubkey <(cat ./publickey) wgaddr 10.0.0.3/24 addr 192.168.0.3/24"
+	echo "$filename set host client servaddr 10.0.0.3"
+	echo "$filename set host server"
+}
+
+is_valid_inet() {
+	return [[ $1 =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]
+}
+
+is_valid_cidr() {
+	return [[ $1 =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}\/[0-9]{1,3}$ ]]
+}
+
+is_valid_ipport() {
+	return [[ $1 =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}:[0-9]{1,5}$ ]]
+}
+
+generate_key() {
+	wg genkey | (umask 0077 && tee $keyname) | wg pubkey > $pubkeyname
+}
+
+add_wireguard() {
+	ip link add $wg_if type wireguard
+	ip address add $1 dev $wg_if
+	wg set $wg_if private-key $keyname
+	ip link set $wg_if up
+}
+
+add_peer() {
+	wg set $wg_if peer $1 allowed-ips $2 endpoint $3
+}
+
+set_server() {
+	if [ -e ./restore.sh ]; then
+		./restore.sh
+	fi
+
+	local dns_if=$(resolvectl default-route | awk '/yes/ {print $3}' | tr -d '():')
+	local dns_serv=$(resolvectl dns $dns_if | cut -d " " -f 4)
+
+	iptables -t nat -I PREROUTING -p udp --dport 53 -j DNAT --to-destination $dns_serv
+	iptables -t nat -I POSTROUTING -o $wg_if -j MASQUERADE
+
+	echo "iptables -t nat -D PREROUTING -p udp --dport 53 -j DNAT --to-destination $dns_serv" > ./restore.sh
+	echo "iptables -t nat -D POSTROUTING -o $wg_if -j MASQUERADE" >> ./restore.sh
+	chmod +x ./restore.sh
+}
+
+set_client() {
+	if [ -e ./restore.sh ]; then
+		./restore.sh
+	fi
+
+	local prev_dnsserver=$(resolvectl dns $wg_if | cut -d " " -f 4,5)
+
+	ip route add 0.0.0.0/0 via $1 dev $wg_if
+	iptables -t nat -I POSTROUTING -j DNAT --to-destination $1
+	resolvectl dns $wg_if $1
+
+	echo $prev_dnsserver > ./restore.sh
+	echo "ip route delete 0.0.0.0/0 via $1 dev $wg_if" >> ./restore.sh
+	echo "iptables -t nat -D POSTROUTING -j DNAT --to-destination $1" >> ./restore.sh
+	chmod +x ./restore.sh
+}
+
+
+if [ "$1" = "genkey" -a $# -eq 1 ]; then
+	generate_key
+elif [ "$1" = "add" -a "$2" = "wireguard" ] && is_valid_cidr $3 && [ "$4" = 'private-key' -a -n "$5" -a $# -eq 5]; then
+	add_wireguard $3
+elif [ "$1" = "add" -a "$2" = "peer" -a "$3" = "pubkey" -a -n "$4" -a "$5" = "wgaddr" ] && is_valid_cidr $6 && [ $7 = "addr" ] && is_valid_ipport $8 && [ $# -eq 8 ]; then
+	add_peer $4 $6 $8
+elif [ "$1" = "set" -a "$2" = "host" -a "$3" = "client" -a "$4" = "servaddr" ] && is_valid_inet $5 && [ $# -eq 5 ]; then
+	set_client $5
+elif [ "$1" = "set" -a "$2" = "host" -a "$3" = "server" -a $# -eq 3 ]; then
+	set_server	
+else
+	print_help
+fi
