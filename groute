@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/bin/bash
+
 filename=$(basename $0)
 
 #### Package requirements
@@ -22,11 +23,11 @@ pubkeyname=publickey
 #### Main
 print_help() {
 	echo "USAGE:"
-	echo "genkey \t\t\t\t\t\t\t generates wireguard's private and public key"
-	echo "add wireguard <CIDR> private-key <PATH> \t\t create a wireguard interface (default: wg0) with the specified <CIDR>"
-	echo "add peer pubkey <PUBKEY> wgaddr <CIDR> addr <CIDR> \t add connection between peers"
-	echo "set host client servaddr <INET> \t\t\t setup host as client and connects to server with address <INET>. Creates a restore.sh for restoring host configuration"
-	echo "set host server \t\t\t\t\t setup host as server. Creates a restore.sh for restoring host configuration"
+	echo -e "genkey \t\t\t\t\t\t\t generates wireguard's private and public key"
+	echo -e "add wireguard <CIDR> private-key <PATH> \t\t create a wireguard interface (default: wg0) with the specified <CIDR>"
+	echo -e "add peer pubkey <PUBKEY> wgaddr <CIDR> addr <CIDR> \t add connection between peers"
+	echo -e "set host client servaddr <INET> \t\t\t setup host as client and connects to server with address <INET>. Creates a restore.sh for restoring host configuration"
+	echo -e "set host server \t\t\t\t\t setup host as server. Creates a restore.sh for restoring host configuration"
 	echo	
 	echo "EXAMPLE:"
 	echo "$filename genkey"
